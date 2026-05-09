@@ -1560,7 +1560,7 @@ function Tooltip3D({ visible, text, position }: { visible: boolean; text: string
     <Text
       ref={ref}
       position={position}
-      font="/fonts/Nirakolu.ttf"
+      font="/fonts/OpenSauceSans-Black.ttf"
       fontSize={0.045}
       color="#FFFFFF"
       letterSpacing={0.12}
@@ -1568,7 +1568,7 @@ function Tooltip3D({ visible, text, position }: { visible: boolean; text: string
       anchorY="middle"
       fillOpacity={0}
       outlineWidth={0.004}
-      outlineColor="#2C1810"
+      outlineColor="#FFFFFF"
       outlineOpacity={0.6}
     >
       {text}
@@ -1789,26 +1789,26 @@ export default function Scene3D() {
         </div>
         <div style={{ display: 'flex', gap: '40px' }}>
           <button
-            style={{ background: 'none', border: 'none', color: '#D4C4A8', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
+            style={{ background: 'none', border: 'none', color: '#FFFFFF', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
             onClick={() => openPopup('about')}
             onMouseEnter={(e) => e.currentTarget.style.color = '#F2EDE6'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#D4C4A8'}
+            onMouseLeave={(e) => e.currentTarget.style.color = '#FFFFFF'}
           >
             About
           </button>
           <button
-            style={{ background: 'none', border: 'none', color: '#D4C4A8', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
+            style={{ background: 'none', border: 'none', color: '#FFFFFF', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
             onClick={() => openPopup('menu')}
             onMouseEnter={(e) => e.currentTarget.style.color = '#F2EDE6'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#D4C4A8'}
+            onMouseLeave={(e) => e.currentTarget.style.color = '#FFFFFF'}
           >
             Projects
           </button>
           <button
-            style={{ background: 'none', border: 'none', color: '#D4C4A8', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
+            style={{ background: 'none', border: 'none', color: '#FFFFFF', cursor: 'pointer', fontFamily: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', transition: 'color 0.2s' }}
             onClick={() => openPopup('order')}
             onMouseEnter={(e) => e.currentTarget.style.color = '#F2EDE6'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#D4C4A8'}
+            onMouseLeave={(e) => e.currentTarget.style.color = '#FFFFFF'}
           >
             Connect
           </button>
