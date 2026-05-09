@@ -1560,9 +1560,9 @@ function Tooltip3D({ visible, text, position }: { visible: boolean; text: string
     <Text
       ref={ref}
       position={position}
-      font="/fonts/OpenSauceSans-Bold.ttf"
+      font="/fonts/Nirakolu.ttf"
       fontSize={0.045}
-      color="#F2EDE6"
+      color="#FFFFFF"
       letterSpacing={0.12}
       anchorX="center"
       anchorY="middle"
