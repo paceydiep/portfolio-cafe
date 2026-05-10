@@ -1,13 +1,12 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import {
-  MeshReflectorMaterial, ContactShadows, Environment, Text,
+  RoundedBox,
+  Text,
+  useGLTF,
 } from "@react-three/drei";
-import {
-  EffectComposer, Bloom, DepthOfField, Noise, Vignette,
-} from "@react-three/postprocessing";
-import { BlendFunction } from "postprocessing";
 import {
   useRef, useEffect, useState, useCallback, Suspense, useMemo,
 } from "react";
@@ -17,8 +16,11 @@ import MenuPopup from "./MenuPopup";
 import AboutPopup from "./AboutPopup";
 import OrderPopup from "./OrderPopup";
 import CaseStudy from "./CaseStudy";
+import { rotate } from "three/tsl";
 
 type Popup = "menu" | "about" | "order" | null;
+type HoverTarget = "menu" | "order" | "vinyl" | "cups" | null;
+type MeshPointerEvent = ThreeEvent<PointerEvent>;
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function clamp(v: number, lo: number, hi: number) { return Math.min(hi, Math.max(lo, v)); }
@@ -257,7 +259,7 @@ type Textures = ReturnType<typeof useProceduralTextures>;
 
 // ─── STEAM SYSTEM ─────────────────────────────────────────────────────────────
 function SteamSystem({ position }: { position: [number, number, number] }) {
-  const N = 14;
+  const N = 7;
   const meshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const offsets = useMemo(() => Array.from({ length: N }, (_, i) => i / N), []);
 
@@ -297,7 +299,7 @@ function SteamSystem({ position }: { position: [number, number, number] }) {
 // ─── CAMERA RIG ───────────────────────────────────────────────────────────────
 function CameraRig({ activePopup }: { activePopup: Popup }) {
   const proxy = useRef({
-    z: 8.5,
+    z: 0,
     baseX: 0,
     baseY: 1.62,
     lookX: 0,
@@ -317,16 +319,22 @@ function CameraRig({ activePopup }: { activePopup: Popup }) {
   }, []);
 
   useEffect(() => {
-    if (!activePopup || activePopup === "about") {
+    if (!activePopup) {
       gsap.to(proxy.current, {
         baseX: 0, baseY: 1.62, z: 5.2,
         lookX: 0, lookY: 0.82, lookZ: 0,
-        duration: 2.0, ease: "power3.inOut"
+        duration: 0.8, ease: "power2.out"
+      });
+    } else if (activePopup === "about") {
+      gsap.to(proxy.current, {
+        baseX: -1.15, baseY: 1.75, z: 3.35,
+        lookX: -1.15, lookY: 1.78, lookZ: 0.05,
+        duration: 1.5, ease: "power3.inOut"
       });
     } else if (activePopup === "menu") {
       gsap.to(proxy.current, {
-        baseX: -3.2, baseY: 1.45, z: 2.8,
-        lookX: -3.2, lookY: 1.1, lookZ: 1.8,
+        baseX: 1.8, baseY: 1.45, z: 2.8,
+        lookX: 1.8, lookY: 1.18, lookZ: 1.95,
         duration: 1.5, ease: "power3.inOut"
       });
     } else if (activePopup === "order") {
@@ -355,43 +363,36 @@ function CameraRig({ activePopup }: { activePopup: Popup }) {
 
 // ─── CURTAINS & WINDOWS ───────────────────────────────────────────────────────
 function Curtain({ position, height = 3.6, width = 1.2 }: { position: [number, number, number], height?: number, width?: number }) {
-  const geoRef = useRef<THREE.PlaneGeometry>(null);
-  const initPosRef = useRef<Float32Array | null>(null);
-
-  useFrame(({ clock }) => {
-    if (!geoRef.current) return;
-    const t = clock.elapsedTime;
-    const posAttribute = geoRef.current.attributes.position;
-
-    if (!initPosRef.current) {
-      initPosRef.current = new Float32Array(posAttribute.array);
-    }
-    const initPos = initPosRef.current;
+  const geometry = useMemo(() => {
+    const geo = new THREE.PlaneGeometry(width, height, 24, 14);
+    const posAttribute = geo.attributes.position;
 
     for (let i = 0; i < posAttribute.count; i++) {
-      const x = initPos[i * 3];
-      const y = initPos[i * 3 + 1];
-      const z = initPos[i * 3 + 2];
-
-      // normalize y to [0, 1] for increasing sway at bottom
+      const x = posAttribute.getX(i);
+      const y = posAttribute.getY(i);
       const yNorm = (height / 2 - y) / height;
-
-      // softer folds based on x
-      const folds = Math.sin(x * 12) * 0.025;
-
-      // very subtle wind sway
-      const sway = Math.sin(t * 1.2 + y * 1.5) * 0.03 * yNorm + Math.sin(t * 0.8 + x * 2) * 0.01 * yNorm;
-
-      posAttribute.setZ(i, z + folds + sway);
+      const folds = Math.sin(x * 18) * 0.022;
+      const drape = Math.sin(yNorm * Math.PI) * 0.018;
+      posAttribute.setZ(i, folds + drape);
     }
+
     posAttribute.needsUpdate = true;
-    geoRef.current.computeVertexNormals();
-  });
+    geo.computeVertexNormals();
+    return geo;
+  }, [height, width]);
 
   return (
     <mesh position={position}>
-      <planeGeometry ref={geoRef} args={[width, height, 32, 32]} />
-      <meshStandardMaterial color="#EAE6DF" roughness={0.9} side={THREE.DoubleSide} />
+      <primitive object={geometry} attach="geometry" />
+      <meshPhysicalMaterial
+        color="#F2EFE8"
+        roughness={0.72}
+        transmission={0.28}
+        transparent
+        opacity={0.8}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
@@ -401,8 +402,8 @@ function WindowWithCurtains({ position, rotation }: { position: [number, number,
   const height = 6.0;
 
   // Crittall window grid (dividers)
-  const cols = 5;
-  const rows = 8;
+  const cols = 2;
+  const rows = 2;
   const hSpacing = width / cols;
   const vSpacing = height / rows;
 
@@ -455,9 +456,9 @@ function WindowWithCurtains({ position, rotation }: { position: [number, number,
         </mesh>
       ))}
 
-      {/* Curtains */}
-      <Curtain position={[-1.7, -0.2, 0.15]} height={6.2} width={1.8} />
-      <Curtain position={[1.7, -0.2, 0.15]} height={6.2} width={1.8} />
+      {/* Closed sheer curtains */}
+      <Curtain position={[-1.0, -0.2, 0.15]} height={6.2} width={2.18} />
+      <Curtain position={[1.0, -0.2, 0.16]} height={6.2} width={2.18} />
 
       {/* Rod */}
       <mesh position={[0, height / 2 + 0.15, 0.15]} rotation={[0, 0, Math.PI / 2]}>
@@ -475,21 +476,13 @@ function Room({ tex }: { tex: Textures }) {
       {/* Hardwood floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <planeGeometry args={[16, 12]} />
-        <MeshReflectorMaterial
+        <meshStandardMaterial
           map={tex?.hardwood ?? null}
           normalMap={tex?.normalHardwood ?? null}
           normalScale={new THREE.Vector2(0.5, 0.5)}
           color="#EAE0D0"
           roughness={0.65}
           metalness={0.05}
-          mirror={0.15}
-          blur={[50, 30]}
-          resolution={512}
-          mixBlur={1.0}
-          mixStrength={0.5}
-          depthScale={0.8}
-          minDepthThreshold={0.3}
-          maxDepthThreshold={1.2}
         />
       </mesh>
 
@@ -554,14 +547,12 @@ function BackBar({ tex }: { tex: Textures }) {
   return (
     <group>
       {/* Cabinet body */}
-      <mesh position={[0, 0.58, -3.2]}>
-        <boxGeometry args={[13, 1.16, 0.72]} />
+      <RoundedBox position={[0, 0.58, -3.2]} args={[13, 1.16, 0.72]} radius={0.06} smoothness={4}>
         <meshStandardMaterial color="#786450" roughness={0.82} metalness={0.08} />
-      </mesh>
-      <mesh position={[0, 1.19, -3.16]}>
-        <boxGeometry args={[13.1, 0.06, 0.78]} />
+      </RoundedBox>
+      <RoundedBox position={[0, 1.19, -3.16]} args={[13.1, 0.06, 0.78]} radius={0.025} smoothness={3}>
         <meshStandardMaterial color="#D0C8C0" roughness={0.35} metalness={0.08} />
-      </mesh>
+      </RoundedBox>
       <mesh position={[0, 0.58, -2.85]}>
         <boxGeometry args={[13, 1.12, 0.04]} />
         <meshStandardMaterial color="#6A5840" roughness={0.85} metalness={0.05} />
@@ -569,14 +560,13 @@ function BackBar({ tex }: { tex: Textures }) {
 
       {/* Shelves — wood grain */}
       {[2.25, 3.1].map((y, i) => (
-        <mesh key={i} position={[0, y, -3.3]}>
-          <boxGeometry args={[12, 0.05, 0.42]} />
+        <RoundedBox key={i} position={[0, y, -3.3]} args={[12, 0.05, 0.42]} radius={0.018} smoothness={3}>
           <meshStandardMaterial
             map={tex?.wood ?? null}
             color="#9A8060"
             roughness={0.52} metalness={0.18}
           />
-        </mesh>
+        </RoundedBox>
       ))}
 
       {/* Shelf brackets */}
@@ -592,15 +582,6 @@ function BackBar({ tex }: { tex: Textures }) {
       ))}
 
       <ShelfItems />
-
-      {/* Mug rail */}
-      <mesh position={[0, 1.72, -2.88]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.015, 0.015, 12.5, 8]} />
-        <meshStandardMaterial color="#9A8060" roughness={0.5} metalness={0.4} />
-      </mesh>
-      {[-5.5, -4.5, -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5].map((x, i) => (
-        <HangingMug key={i} position={[x, 1.72, -2.88]} />
-      ))}
     </group>
   );
 }
@@ -614,10 +595,9 @@ function ShelfItems() {
       {/* Coffee bags + Text labels — upper shelf */}
       {BAG_COLORS.map((col, i) => (
         <group key={i} position={[-3.5 + i * 0.55, 2.52, -3.26]} rotation={[0, (i - 2) * 0.04, 0]}>
-          <mesh>
-            <boxGeometry args={[0.32, 0.52, 0.15]} />
+          <RoundedBox args={[0.32, 0.52, 0.15]} radius={0.035} smoothness={4}>
             <meshStandardMaterial color={col} roughness={0.9} metalness={0} />
-          </mesh>
+          </RoundedBox>
           {/* Valve */}
           <mesh position={[0, 0.06, 0.08]}>
             <cylinderGeometry args={[0.04, 0.04, 0.02, 8]} />
@@ -641,111 +621,11 @@ function ShelfItems() {
 
       {/* Extra bags */}
       {["#3A2E22", "#4A3C2A", "#2C2418"].map((col, i) => (
-        <mesh key={i} position={[2.5 + i * 0.45, 2.52, -3.26]}>
-          <boxGeometry args={[0.32, 0.52, 0.15]} />
+        <RoundedBox key={i} position={[2.5 + i * 0.45, 2.52, -3.26]} args={[0.32, 0.52, 0.15]} radius={0.035} smoothness={4}>
           <meshStandardMaterial color={col} roughness={0.9} metalness={0} />
-        </mesh>
+        </RoundedBox>
       ))}
 
-      {/* Framed print */}
-      <group position={[4.5, 2.65, -3.92]}>
-        <mesh>
-          <boxGeometry args={[0.9, 1.12, 0.05]} />
-          <meshStandardMaterial color="#5A4838" roughness={0.8} metalness={0.1} />
-        </mesh>
-        <mesh position={[0, 0, 0.03]}>
-          <boxGeometry args={[0.80, 1.02, 0.01]} />
-          <meshStandardMaterial color="#F0EDE6" roughness={1} metalness={0} />
-        </mesh>
-        {/* Botanical line detail */}
-        {[
-          { pos: [0, -0.1, 0.04] as [number, number, number], rot: [0, 0, 0] as [number, number, number], size: [0.005, 0.5, 0.005] as [number, number, number] },
-          { pos: [-0.1, 0.05, 0.04] as [number, number, number], rot: [0, 0, 0.3] as [number, number, number], size: [0.005, 0.3, 0.005] as [number, number, number] },
-          { pos: [0.1, 0.05, 0.04] as [number, number, number], rot: [0, 0, -0.3] as [number, number, number], size: [0.005, 0.28, 0.005] as [number, number, number] },
-        ].map((l, i) => (
-          <mesh key={i} position={l.pos} rotation={l.rot}>
-            <boxGeometry args={l.size} />
-            <meshStandardMaterial color="#5A4838" roughness={1} metalness={0} />
-          </mesh>
-        ))}
-      </group>
-
-      {/* Syrup/ingredient bottles — extended row */}
-      {[0, 0.26, 0.52, 0.78, 1.04, 1.30, 1.56, 1.82, 2.08].map((dx, i) => (
-        <group key={i} position={[-5.2 + dx, 1.52, -3.26]}>
-          <mesh>
-            <cylinderGeometry args={[0.044, 0.05, i % 3 === 0 ? 0.50 : i % 3 === 1 ? 0.38 : 0.44, 10]} />
-            <meshPhysicalMaterial
-              color={`hsl(${20 + i * 18}, 48%, ${48 + (i % 4) * 7}%)`}
-              roughness={0.06}
-              metalness={0}
-              transmission={0.70}
-              transparent
-              ior={1.46}
-              thickness={0.14}
-            />
-          </mesh>
-          {/* Pump cap */}
-          <mesh position={[0, i % 3 === 0 ? 0.28 : i % 3 === 1 ? 0.22 : 0.25, 0]}>
-            <cylinderGeometry args={[0.018, 0.022, 0.04, 8]} />
-            <meshStandardMaterial color="#2A2A2A" roughness={0.6} metalness={0.3} />
-          </mesh>
-          <mesh position={[0, i % 3 === 0 ? 0.32 : i % 3 === 1 ? 0.26 : 0.29, 0]}>
-            <cylinderGeometry args={[0.006, 0.006, 0.06, 6]} />
-            <meshStandardMaterial color="#555" roughness={0.5} metalness={0.4} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Glass jars — wider spread */}
-      {[-3.2, -2.5, -1.8, -1.1, -0.4].map((x, i) => (
-        <group key={i} position={[x, 1.58, -3.28]}>
-          <mesh>
-            <cylinderGeometry args={[0.076 + (i % 2) * 0.01, 0.072 + (i % 2) * 0.01, 0.38 + (i % 3) * 0.06, 12]} />
-            <meshPhysicalMaterial
-              color={i % 2 === 0 ? "#C8D4C0" : "#D4CCC0"}
-              roughness={0.04}
-              metalness={0}
-              transmission={0.82}
-              transparent
-              ior={1.52}
-              thickness={0.1}
-            />
-          </mesh>
-          {/* Lid */}
-          <mesh position={[0, 0.21 + (i % 3) * 0.03, 0]}>
-            <cylinderGeometry args={[0.082 + (i % 2) * 0.01, 0.082 + (i % 2) * 0.01, 0.032, 12]} />
-            <meshStandardMaterial color={i % 2 === 0 ? "#9A8860" : "#7A6848"} roughness={0.4} metalness={0.5} />
-          </mesh>
-          {/* Content fill (visible through glass) */}
-          <mesh position={[0, 0.04, 0]}>
-            <cylinderGeometry args={[0.064 + (i % 2) * 0.008, 0.060 + (i % 2) * 0.008, 0.28 + (i % 3) * 0.04, 10]} />
-            <meshStandardMaterial
-              color={["#8B5E3C", "#F5DEB3", "#3C2010", "#C8A870", "#6B4423"][i]}
-              roughness={0.9} metalness={0}
-            />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-function HangingMug({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      <mesh position={[0, -0.04, 0.06]}>
-        <torusGeometry args={[0.025, 0.006, 6, 8, Math.PI]} />
-        <meshStandardMaterial color="#9A8060" roughness={0.4} metalness={0.6} />
-      </mesh>
-      <mesh position={[0, -0.12, 0.06]}>
-        <cylinderGeometry args={[0.065, 0.055, 0.12, 12]} />
-        <meshStandardMaterial color="#F0ECE6" roughness={0.5} metalness={0.02} />
-      </mesh>
-      <mesh position={[0.085, -0.12, 0.06]} rotation={[0, 0, Math.PI / 2]}>
-        <torusGeometry args={[0.03, 0.009, 6, 8, Math.PI]} />
-        <meshStandardMaterial color="#EEE8E2" roughness={0.5} metalness={0.02} />
-      </mesh>
     </group>
   );
 }
@@ -754,18 +634,16 @@ function HangingMug({ position }: { position: [number, number, number] }) {
 function Counter({ tex }: { tex: Textures }) {
   return (
     <group>
-      <mesh position={[0, 0.5, 1.7]}>
-        <boxGeometry args={[11.5, 1.0, 1.3]} />
+      <RoundedBox position={[0, 0.5, 1.7]} args={[11.5, 1.0, 1.3]} radius={0.08} smoothness={5}>
         <meshStandardMaterial color="#C0B8B0" roughness={0.72} metalness={0.06} />
-      </mesh>
+      </RoundedBox>
       {/* Front panel detail */}
       <mesh position={[0, 0.5, 2.351]}>
         <planeGeometry args={[11.48, 0.98]} />
         <meshStandardMaterial color="#B0A8A0" roughness={0.78} metalness={0.04} />
       </mesh>
       {/* Marble top with texture + normal map */}
-      <mesh position={[0, 1.045, 1.68]}>
-        <boxGeometry args={[11.7, 0.09, 1.45]} />
+      <RoundedBox position={[0, 1.045, 1.68]} args={[11.7, 0.09, 1.45]} radius={0.045} smoothness={5}>
         <meshPhysicalMaterial
           map={tex?.marble ?? null}
           roughnessMap={tex?.marbleRoughness ?? null}
@@ -777,17 +655,16 @@ function Counter({ tex }: { tex: Textures }) {
           clearcoat={0.3}
           clearcoatRoughness={0.25}
         />
-      </mesh>
+      </RoundedBox>
       {/* Edge highlight */}
       <mesh position={[0, 1.09, 2.36]}>
         <boxGeometry args={[11.72, 0.02, 0.04]} />
         <meshStandardMaterial color="#F2EDE6" roughness={0.15} metalness={0.1} />
       </mesh>
       {/* Black Plinth Base - Slightly larger to prevent Z-fighting */}
-      <mesh position={[0, 0.02, 1.7]}>
-        <boxGeometry args={[11.54, 0.04, 1.34]} />
+      <RoundedBox position={[0, 0.02, 1.7]} args={[11.54, 0.04, 1.34]} radius={0.018} smoothness={3}>
         <meshStandardMaterial color="#1A1208" roughness={1} metalness={0} />
-      </mesh>
+      </RoundedBox>
     </group>
   );
 }
@@ -795,278 +672,112 @@ function Counter({ tex }: { tex: Textures }) {
 // ─── LA MARZOCCO LINEA ────────────────────────────────────────────────────────
 // All metal surfaces upgraded to MeshPhysicalMaterial with clearcoat
 function LaMarzocco({ position }: { position: [number, number, number] }) {
-  // Reusable physical materials
-  const body = { color: "#D0CCCA", roughness: 0.18, metalness: 0.88, clearcoat: 0.7, clearcoatRoughness: 0.08 };
-  const bodyDark = { color: "#9A9694", roughness: 0.32, metalness: 0.78, clearcoat: 0.4, clearcoatRoughness: 0.12 };
-  const chrome = { color: "#E2DEDE", roughness: 0.06, metalness: 0.96, clearcoat: 1.0, clearcoatRoughness: 0.04 };
+  const { scene } = useGLTF("/models/la_marzocco_coffee_machine.glb");
+  const model = useMemo(() => scene.clone(true), [scene]);
 
   return (
     <group position={position}>
-      {/* Main body */}
-      <mesh position={[0, 0.26, 0]}>
-        <boxGeometry args={[1.22, 0.48, 0.44]} />
-        <meshPhysicalMaterial {...body} />
-      </mesh>
-      <mesh position={[0, 0.26, 0.225]}>
-        <boxGeometry args={[1.1, 0.42, 0.01]} />
-        <meshPhysicalMaterial {...bodyDark} />
-      </mesh>
-      <mesh position={[0, 0.505, 0]}>
-        <boxGeometry args={[1.22, 0.02, 0.44]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-
-      {/* Boiler humps */}
-      {([-0.22, 0.22] as const).map((x, i) => (
-        <group key={i} position={[x, 0.58, 0]}>
-          <mesh>
-            <cylinderGeometry args={[0.16, 0.14, 0.14, 20]} />
-            <meshPhysicalMaterial {...body} />
-          </mesh>
-          <mesh position={[0, 0.08, 0]}>
-            <cylinderGeometry args={[0.05, 0.05, 0.04, 10]} />
-            <meshPhysicalMaterial {...chrome} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* End panels */}
-      {([-0.63, 0.63] as const).map((x, i) => (
-        <mesh key={i} position={[x, 0.26, 0]}>
-          <boxGeometry args={[0.07, 0.52, 0.46]} />
-          <meshPhysicalMaterial {...body} />
-        </mesh>
-      ))}
-
-      {/* Group heads */}
-      {([-0.28, 0.28] as const).map((x, i) => (
-        <group key={i} position={[x, 0.08, 0.12]}>
-          <mesh>
-            <cylinderGeometry args={[0.12, 0.12, 0.06, 20]} />
-            <meshPhysicalMaterial {...bodyDark} />
-          </mesh>
-          <mesh position={[0, -0.04, 0]}>
-            <cylinderGeometry args={[0.098, 0.098, 0.018, 18]} />
-            <meshPhysicalMaterial color="#7A7874" roughness={0.45} metalness={0.72} clearcoat={0.3} clearcoatRoughness={0.1} />
-          </mesh>
-          <mesh position={[0, -0.07, 0]}>
-            <cylinderGeometry args={[0.08, 0.1, 0.03, 14]} />
-            <meshPhysicalMaterial color="#888480" roughness={0.4} metalness={0.72} clearcoat={0.3} clearcoatRoughness={0.1} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Portafilters */}
-      {([-0.28, 0.28] as const).map((x, i) => (
-        <group key={i} position={[x, -0.04, 0.12]}>
-          <mesh position={[0, -0.08, 0]} rotation={[0.55, 0, 0]}>
-            <cylinderGeometry args={[0.025, 0.022, 0.34, 10]} />
-            <meshPhysicalMaterial color="#706C68" roughness={0.5} metalness={0.65} clearcoat={0.2} clearcoatRoughness={0.15} />
-          </mesh>
-          <mesh position={[0, -0.14, 0.1]}>
-            <cylinderGeometry args={[0.065, 0.055, 0.03, 14]} />
-            <meshPhysicalMaterial color="#686460" roughness={0.45} metalness={0.68} clearcoat={0.2} clearcoatRoughness={0.12} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Paddle levers */}
-      {([-0.28, 0.28] as const).map((x, i) => (
-        <group key={i} position={[x, 0.32, 0.23]}>
-          <mesh>
-            <boxGeometry args={[0.16, 0.06, 0.028]} />
-            <meshPhysicalMaterial {...bodyDark} />
-          </mesh>
-          <mesh position={[0, 0.07, 0]}>
-            <cylinderGeometry args={[0.02, 0.02, 0.06, 8]} />
-            <meshPhysicalMaterial {...chrome} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Pressure gauge */}
-      <group position={[0, 0.36, 0.226]}>
-        <mesh>
-          <cylinderGeometry args={[0.07, 0.07, 0.016, 18]} />
-          <meshPhysicalMaterial color="#D4D0CC" roughness={0.28} metalness={0.72} clearcoat={0.5} clearcoatRoughness={0.08} />
-        </mesh>
-        <mesh position={[0, 0.012, 0]}>
-          <cylinderGeometry args={[0.055, 0.055, 0.006, 16]} />
-          <meshPhysicalMaterial color="#F0ECE8" roughness={0.7} metalness={0.02} clearcoat={0.2} clearcoatRoughness={0.1} />
-        </mesh>
-      </group>
-
-      {/* Logo */}
-      <Text
-        position={[0, 0.14, 0.228]}
-        fontSize={0.028}
-        color="#9A9490"
-        letterSpacing={0.18}
-        anchorX="center"
-        anchorY="middle"
-      >
-        LA MARZOCCO
-      </Text>
-
-      {/* Steam wands */}
-      {([-1, 1] as const).map((side, i) => (
-        <group key={i} position={[side * 0.63, 0.28, 0.05]}>
-          <mesh rotation={[0.45, 0, side * 0.25]}>
-            <cylinderGeometry args={[0.014, 0.012, 0.4, 8]} />
-            <meshPhysicalMaterial {...chrome} />
-          </mesh>
-          <mesh position={[side * 0.08, -0.18, 0.12]}>
-            <sphereGeometry args={[0.022, 8, 8]} />
-            <meshPhysicalMaterial color="#C8C4C0" roughness={0.25} metalness={0.82} clearcoat={0.5} clearcoatRoughness={0.1} />
-          </mesh>
-          <mesh position={[0, 0.1, 0.08]}>
-            <cylinderGeometry args={[0.032, 0.028, 0.06, 10]} />
-            <meshPhysicalMaterial color="#B0A898" roughness={0.5} metalness={0.52} clearcoat={0.3} clearcoatRoughness={0.12} />
-          </mesh>
-        </group>
-      ))}
-
-      {/* Drip tray */}
-      <mesh position={[0, -0.04, 0.1]}>
-        <boxGeometry args={[1.18, 0.03, 0.38]} />
-        <meshPhysicalMaterial color="#9A9898" roughness={0.38} metalness={0.72} clearcoat={0.4} clearcoatRoughness={0.1} />
-      </mesh>
-      {Array.from({ length: 12 }).map((_, i) => (
-        <mesh key={i} position={[-0.5 + i * 0.091, -0.016, 0.1]}>
-          <boxGeometry args={[0.018, 0.02, 0.33]} />
-          <meshPhysicalMaterial color="#707070" roughness={0.35} metalness={0.78} clearcoat={0.3} clearcoatRoughness={0.1} />
-        </mesh>
-      ))}
+      <primitive object={model} position={[-0.4, 0, 0.04]} scale={[0.15, 0.15, 0.1]} rotation={[0, Math.PI, 0]}/>
     </group>
   );
 }
 
 // ─── NICHE ZERO ───────────────────────────────────────────────────────────────
-function NicheZero({ position }: { position: [number, number, number] }) {
+useGLTF.preload("/models/la_marzocco_coffee_machine.glb");
+
+function CoffeeGrinderModel({
+  position,
+  rotation = [0, 0, 0],
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}) {
+  const { scene } = useGLTF("/models/coffee_grinder.glb");
+  const model = useMemo(() => scene.clone(true), [scene]);
+
   return (
-    <group position={position}>
-      <mesh position={[0, 0.07, 0]}>
-        <boxGeometry args={[0.26, 0.14, 0.26]} />
-        <meshStandardMaterial color="#1E1E1C" roughness={0.88} metalness={0.1} />
-      </mesh>
-      <mesh position={[0, 0.38, 0]}>
-        <boxGeometry args={[0.23, 0.5, 0.23]} />
-        <meshStandardMaterial color="#1E1E1C" roughness={0.88} metalness={0.1} />
-      </mesh>
-      <mesh position={[0, 0.645, 0]}>
-        <cylinderGeometry args={[0.115, 0.1, 0.04, 18]} />
-        <meshPhysicalMaterial color="#9A9694" roughness={0.32} metalness={0.78} clearcoat={0.4} clearcoatRoughness={0.1} />
-      </mesh>
-      <mesh position={[0, 0.78, 0]}>
-        <coneGeometry args={[0.1, 0.22, 16]} />
-        <meshStandardMaterial color="#2A2A28" roughness={0.85} metalness={0.1} />
-      </mesh>
-      <mesh position={[0, 0.895, 0]}>
-        <cylinderGeometry args={[0.1, 0.1, 0.01, 16]} />
-        <meshStandardMaterial color="#3A3A38" roughness={0.8} metalness={0.2} />
-      </mesh>
-      <mesh position={[0.12, 0.44, 0]}>
-        <cylinderGeometry args={[0.022, 0.022, 0.012, 12]} />
-        <meshStandardMaterial color="#C9A96E" roughness={0.3} metalness={0.6} />
-      </mesh>
-      <mesh position={[0.12, 0.38, 0]}>
-        <cylinderGeometry args={[0.018, 0.018, 0.01, 10]} />
-        <meshStandardMaterial color="#444" roughness={0.7} metalness={0.3} />
-      </mesh>
-      <mesh position={[0, 0.19, 0.1]}>
-        <boxGeometry args={[0.16, 0.06, 0.08]} />
-        <meshStandardMaterial color="#222" roughness={0.9} metalness={0.1} />
-      </mesh>
+    <group position={position} rotation={rotation}>
+      <primitive object={model} position={[0, 0.465, -0.035]} scale={[0.04, 0.04, 0.04]} rotation={[0, Math.PI, 0]} />
     </group>
   );
 }
 
-// ─── EK43 ─────────────────────────────────────────────────────────────────────
-function EK43({ position }: { position: [number, number, number] }) {
+useGLTF.preload("/models/coffee_grinder.glb");
+
+function VinylRecordPlayerModel({
+  position,
+  rotation = [0, 0, 0],
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}) {
+  const { scene } = useGLTF("/models/vinyl_record_player.glb");
+  const model = useMemo(() => scene.clone(true), [scene]);
+
   return (
-    <group position={position}>
-      <mesh position={[0, 0.05, 0]}>
-        <boxGeometry args={[0.34, 0.1, 0.34]} />
-        <meshPhysicalMaterial color="#C8C4BE" roughness={0.42} metalness={0.58} clearcoat={0.3} clearcoatRoughness={0.12} />
-      </mesh>
-      <mesh position={[0, 0.44, 0]}>
-        <boxGeometry args={[0.3, 0.68, 0.3]} />
-        <meshPhysicalMaterial color="#CCCAC4" roughness={0.36} metalness={0.60} clearcoat={0.35} clearcoatRoughness={0.1} />
-      </mesh>
-      <mesh position={[-0.151, 0.44, 0]}>
-        <boxGeometry args={[0.008, 0.68, 0.3]} />
-        <meshPhysicalMaterial color="#D8D4D0" roughness={0.18} metalness={0.72} clearcoat={0.5} clearcoatRoughness={0.06} />
-      </mesh>
-      <mesh position={[0, 0.8, 0]}>
-        <cylinderGeometry args={[0.14, 0.13, 0.04, 18]} />
-        <meshPhysicalMaterial color="#B8B4B0" roughness={0.32} metalness={0.68} clearcoat={0.4} clearcoatRoughness={0.08} />
-      </mesh>
-      {/* Glass hopper — transmission for realism */}
-      <mesh position={[0, 1.05, 0]}>
-        <cylinderGeometry args={[0.12, 0.22, 0.46, 18]} />
-        <meshPhysicalMaterial
-          color="#C8D4DC"
-          roughness={0.02}
-          metalness={0}
-          transmission={0.88}
-          transparent
-          ior={1.52}
-          thickness={0.3}
-          envMapIntensity={1.5}
-        />
-      </mesh>
-      <mesh position={[0, 1.29, 0]}>
-        <cylinderGeometry args={[0.225, 0.225, 0.02, 16]} />
-        <meshPhysicalMaterial color="#B8B4B0" roughness={0.32} metalness={0.62} clearcoat={0.4} clearcoatRoughness={0.08} />
-      </mesh>
-      <mesh position={[0, 0.3, 0.155]}>
-        <cylinderGeometry args={[0.03, 0.03, 0.025, 12]} />
-        <meshPhysicalMaterial color="#C0BCB8" roughness={0.28} metalness={0.72} clearcoat={0.5} clearcoatRoughness={0.06} />
-      </mesh>
-      <mesh position={[0, 0.18, 0.16]}>
-        <boxGeometry args={[0.12, 0.06, 0.04]} />
-        <meshPhysicalMaterial color="#AAA8A4" roughness={0.45} metalness={0.58} clearcoat={0.2} clearcoatRoughness={0.12} />
-      </mesh>
+    <group position={position} rotation={rotation}>
+      <primitive object={model} position={[-0.093, 0.111, 0.022]} scale={[0.00105, 0.00105, 0.00105]} />
+      <pointLight
+        position={[0, 0.85, 0.25]}
+        color="#FFD6A0"
+        intensity={1.4}
+        distance={1.7}
+        decay={2}
+        castShadow={false}
+      />
+      <spotLight
+        position={[-0.25, 1.15, 0.45]}
+        target-position={[0, 0.08, 0]}
+        color="#FFE2B8"
+        intensity={1.1}
+        angle={0.42}
+        penumbra={0.65}
+        distance={2.1}
+        decay={2}
+        castShadow={false}
+      />
     </group>
   );
 }
 
-// ─── TAMPING STATION ──────────────────────────────────────────────────────────
-function TampingStation({ position }: { position: [number, number, number] }) {
+function KettleScaleModel({
+  position,
+  rotation = [0, 0, 0],
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}) {
+  const { scene } = useGLTF("/models/coffee_scales_and_kettle.glb");
+  const model = useMemo(() => scene.clone(true), [scene]);
+
   return (
-    <group position={position}>
-      {/* Tamping mat */}
-      <mesh position={[0, 0.005, 0]}>
-        <boxGeometry args={[0.28, 0.01, 0.20]} />
-        <meshStandardMaterial color="#2A2A28" roughness={0.95} metalness={0} />
-      </mesh>
-      {/* Mat rim */}
-      <mesh position={[0, 0.008, 0]}>
-        <boxGeometry args={[0.30, 0.006, 0.22]} />
-        <meshStandardMaterial color="#1A1A18" roughness={0.9} metalness={0.05} />
-      </mesh>
-      {/* Tamper body */}
-      <mesh position={[0.06, 0.085, 0.04]}>
-        <cylinderGeometry args={[0.028, 0.03, 0.11, 14]} />
-        <meshPhysicalMaterial color="#D0CCCA" roughness={0.18} metalness={0.88} clearcoat={0.7} clearcoatRoughness={0.08} />
-      </mesh>
-      {/* Tamper base */}
-      <mesh position={[0.06, 0.024, 0.04]}>
-        <cylinderGeometry args={[0.032, 0.028, 0.015, 14]} />
-        <meshPhysicalMaterial color="#C4C0BC" roughness={0.22} metalness={0.82} clearcoat={0.5} clearcoatRoughness={0.1} />
-      </mesh>
-      {/* Distribution tool */}
-      <mesh position={[-0.07, 0.055, -0.03]}>
-        <cylinderGeometry args={[0.022, 0.028, 0.07, 12]} />
-        <meshPhysicalMaterial color="#9A9490" roughness={0.32} metalness={0.72} clearcoat={0.4} clearcoatRoughness={0.1} />
-      </mesh>
-      <mesh position={[-0.07, 0.018, -0.03]}>
-        <cylinderGeometry args={[0.03, 0.03, 0.012, 12]} />
-        <meshStandardMaterial color="#7A7470" roughness={0.45} metalness={0.6} />
-      </mesh>
+    <group position={position} rotation={rotation}>
+      <primitive object={model} position={[1.363, 0, 0.024]} scale={[0.014, 0.014, 0.014]} />
     </group>
   );
 }
+
+function ChemexModel({
+  position,
+  rotation = [0, 0, 0],
+}: {
+  position: [number, number, number];
+  rotation?: [number, number, number];
+}) {
+  const { scene } = useGLTF("/models/chemex_drip_coffee_brewer.glb");
+  const model = useMemo(() => scene.clone(true), [scene]);
+
+  return (
+    <group position={position} rotation={rotation}>
+      <primitive object={model} position={[0.003, 0, 0]} scale={[1.8, 1.8, 1.8]} />
+    </group>
+  );
+}
+
+useGLTF.preload("/models/vinyl_record_player.glb");
+useGLTF.preload("/models/coffee_scales_and_kettle.glb");
+useGLTF.preload("/models/chemex_drip_coffee_brewer.glb");
+
 
 // ─── COFFEE CANISTERS ─────────────────────────────────────────────────────────
 function CoffeeCanisters({ position }: { position: [number, number, number] }) {
@@ -1101,194 +812,6 @@ function CoffeeCanisters({ position }: { position: [number, number, number] }) {
   );
 }
 
-// ─── SYRUP RACK ───────────────────────────────────────────────────────────────
-function SyrupRack({ position }: { position: [number, number, number] }) {
-  const syrupColors = [
-    "#8B2020", // raspberry
-    "#4A1A6A", // lavender
-    "#1A3A2A", // matcha
-    "#7A4A10", // caramel
-    "#3A1A0A", // chocolate
-  ];
-  return (
-    <group position={position}>
-      {/* Rack base rail */}
-      <mesh position={[0, 0.01, 0]}>
-        <boxGeometry args={[0.72, 0.018, 0.12]} />
-        <meshStandardMaterial color="#7A6848" roughness={0.55} metalness={0.3} />
-      </mesh>
-      {/* Back rail */}
-      <mesh position={[0, 0.22, -0.05]}>
-        <boxGeometry args={[0.72, 0.016, 0.016]} />
-        <meshStandardMaterial color="#7A6848" roughness={0.55} metalness={0.3} />
-      </mesh>
-      {/* Side uprights */}
-      {([-0.35, 0.35] as const).map((x, i) => (
-        <mesh key={i} position={[x, 0.12, -0.05]}>
-          <boxGeometry args={[0.016, 0.24, 0.016]} />
-          <meshStandardMaterial color="#7A6848" roughness={0.55} metalness={0.3} />
-        </mesh>
-      ))}
-      {/* Syrup bottles on rack */}
-      {syrupColors.map((col, i) => (
-        <group key={i} position={[-0.28 + i * 0.14, 0.14, 0]}>
-          <mesh>
-            <cylinderGeometry args={[0.038, 0.042, 0.26, 10]} />
-            <meshPhysicalMaterial
-              color={col}
-              roughness={0.08} metalness={0} transmission={0.55} transparent ior={1.46} thickness={0.18}
-            />
-          </mesh>
-          {/* Pump */}
-          <mesh position={[0, 0.16, 0]}>
-            <cylinderGeometry args={[0.014, 0.018, 0.038, 8]} />
-            <meshStandardMaterial color="#1A1A1A" roughness={0.6} metalness={0.3} />
-          </mesh>
-          <mesh position={[0, 0.20, 0]}>
-            <cylinderGeometry args={[0.005, 0.005, 0.055, 6]} />
-            <meshStandardMaterial color="#555" roughness={0.5} metalness={0.4} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-// ─── V60 POUR-OVER STAND ──────────────────────────────────────────────────────
-function V60Stand({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      {/* Wooden base */}
-      <mesh position={[0, 0.025, 0]}>
-        <boxGeometry args={[0.22, 0.05, 0.22]} />
-        <meshStandardMaterial color="#8A6840" roughness={0.72} metalness={0.05} />
-      </mesh>
-      {/* Four legs */}
-      {([[-0.08, -0.08], [0.08, -0.08], [-0.08, 0.08], [0.08, 0.08]] as const).map(([x, z], i) => (
-        <mesh key={i} position={[x, 0.11, z]}>
-          <cylinderGeometry args={[0.008, 0.008, 0.22, 8]} />
-          <meshStandardMaterial color="#5A3E28" roughness={0.8} metalness={0.1} />
-        </mesh>
-      ))}
-      {/* Cross-ring */}
-      <mesh position={[0, 0.22, 0]}>
-        <torusGeometry args={[0.085, 0.007, 8, 20]} />
-        <meshStandardMaterial color="#5A3E28" roughness={0.75} metalness={0.1} />
-      </mesh>
-      {/* V60 dripper body (cone) */}
-      <mesh position={[0, 0.30, 0]}>
-        <coneGeometry args={[0.075, 0.14, 16, 1, true]} />
-        <meshPhysicalMaterial color="#D4CFC8" roughness={0.05} metalness={0} transmission={0.88} transparent ior={1.52} thickness={0.05} />
-      </mesh>
-      {/* Dripper lip */}
-      <mesh position={[0, 0.37, 0]}>
-        <torusGeometry args={[0.075, 0.006, 8, 18]} />
-        <meshStandardMaterial color="#C8C4C0" roughness={0.2} metalness={0.3} />
-      </mesh>
-      {/* Paper filter silhouette */}
-      <mesh position={[0, 0.295, 0]}>
-        <coneGeometry args={[0.068, 0.12, 14, 1, true]} />
-        <meshStandardMaterial color="#F5F0E8" roughness={0.95} metalness={0} side={2} />
-      </mesh>
-      {/* Server / glass carafe below */}
-      <mesh position={[0, 0.085, 0]}>
-        <cylinderGeometry args={[0.055, 0.065, 0.13, 14]} />
-        <meshPhysicalMaterial color="#C8D4DC" roughness={0.04} metalness={0} transmission={0.90} transparent ior={1.52} thickness={0.08} />
-      </mesh>
-      {/* Handle */}
-      <mesh position={[0.092, 0.09, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <torusGeometry args={[0.03, 0.005, 6, 10, Math.PI]} />
-        <meshStandardMaterial color="#9A8060" roughness={0.5} metalness={0.3} />
-      </mesh>
-    </group>
-  );
-}
-
-// ─── CHEMEX ───────────────────────────────────────────────────────────────────
-function Chemex({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      {/* Bottom carafe (wide) */}
-      <mesh position={[0, 0.115, 0]}>
-        <cylinderGeometry args={[0.078, 0.092, 0.23, 16]} />
-        <meshPhysicalMaterial color="#C8D4DC" roughness={0.03} metalness={0} transmission={0.92} transparent ior={1.52} thickness={0.1} />
-      </mesh>
-      {/* Waist/neck */}
-      <mesh position={[0, 0.26, 0]}>
-        <cylinderGeometry args={[0.028, 0.078, 0.07, 14]} />
-        <meshPhysicalMaterial color="#C8D4DC" roughness={0.03} metalness={0} transmission={0.92} transparent ior={1.52} thickness={0.08} />
-      </mesh>
-      {/* Wooden collar */}
-      <mesh position={[0, 0.265, 0]}>
-        <torusGeometry args={[0.052, 0.018, 10, 22]} />
-        <meshStandardMaterial color="#8A6840" roughness={0.72} metalness={0.05} />
-      </mesh>
-      {/* Leather tie */}
-      <mesh position={[0.052, 0.265, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.004, 0.004, 0.032, 6]} />
-        <meshStandardMaterial color="#4A3020" roughness={0.9} metalness={0} />
-      </mesh>
-      {/* Top funnel */}
-      <mesh position={[0, 0.335, 0]}>
-        <cylinderGeometry args={[0.068, 0.028, 0.14, 14]} />
-        <meshPhysicalMaterial color="#C8D4DC" roughness={0.03} metalness={0} transmission={0.92} transparent ior={1.52} thickness={0.06} />
-      </mesh>
-      {/* Paper filter */}
-      <mesh position={[0, 0.345, 0]}>
-        <coneGeometry args={[0.062, 0.10, 14, 1, true]} />
-        <meshStandardMaterial color="#F5F0E8" roughness={0.95} metalness={0} side={2} />
-      </mesh>
-    </group>
-  );
-}
-
-// ─── GOOSENECK KETTLE ─────────────────────────────────────────────────────────
-function GooseneckKettle({ position }: { position: [number, number, number] }) {
-  const chrome = { color: "#D8D4D0" as const, roughness: 0.14, metalness: 0.90, clearcoat: 0.8 as number, clearcoatRoughness: 0.06 as number };
-  return (
-    <group position={position}>
-      {/* Body */}
-      <mesh position={[0, 0.13, 0]}>
-        <cylinderGeometry args={[0.068, 0.072, 0.26, 16]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      {/* Base disc */}
-      <mesh position={[0, 0.005, 0]}>
-        <cylinderGeometry args={[0.076, 0.076, 0.01, 16]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      {/* Lid */}
-      <mesh position={[0, 0.265, 0]}>
-        <cylinderGeometry args={[0.065, 0.068, 0.022, 16]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      {/* Lid knob */}
-      <mesh position={[0, 0.284, 0]}>
-        <sphereGeometry args={[0.012, 8, 8]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      {/* Gooseneck spout — approximated with two cylinders + sphere joint */}
-      <mesh position={[0.07, 0.22, 0]} rotation={[0, 0, -0.7]}>
-        <cylinderGeometry args={[0.012, 0.012, 0.12, 8]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      <mesh position={[0.145, 0.13, 0]} rotation={[0, 0, 0.65]}>
-        <cylinderGeometry args={[0.010, 0.012, 0.13, 8]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      <mesh position={[0.168, 0.19, 0]}>
-        <sphereGeometry args={[0.012, 8, 8]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-      {/* Handle (far side) */}
-      <mesh position={[-0.10, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.058, 0.009, 8, 14, Math.PI]} />
-        <meshPhysicalMaterial {...chrome} />
-      </mesh>
-    </group>
-  );
-}
-
 // ─── BAR TOWEL ROLL ───────────────────────────────────────────────────────────
 function BarTowelRoll({ position }: { position: [number, number, number] }) {
   return (
@@ -1312,14 +835,12 @@ function BarTowelRoll({ position }: { position: [number, number, number] }) {
 function Scale({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
-      <mesh>
-        <boxGeometry args={[0.22, 0.025, 0.18]} />
+      <RoundedBox args={[0.22, 0.025, 0.18]} radius={0.012} smoothness={3}>
         <meshStandardMaterial color="#222220" roughness={0.82} metalness={0.15} />
-      </mesh>
-      <mesh position={[-0.028, 0.014, -0.02]}>
-        <boxGeometry args={[0.12, 0.008, 0.09]} />
+      </RoundedBox>
+      <RoundedBox position={[-0.028, 0.014, -0.02]} args={[0.12, 0.008, 0.09]} radius={0.006} smoothness={3}>
         <meshStandardMaterial color="#0A1A0A" roughness={0.5} metalness={0.1} emissive="#0A200A" emissiveIntensity={0.8} />
-      </mesh>
+      </RoundedBox>
       <mesh position={[0.075, 0.014, 0.05]}>
         <cylinderGeometry args={[0.016, 0.016, 0.01, 10]} />
         <meshStandardMaterial color="#C9A96E" roughness={0.3} metalness={0.5} />
@@ -1351,14 +872,12 @@ function Scale({ position }: { position: [number, number, number] }) {
 function PortafilterRack({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
-      <mesh position={[0, 0.24, 0]}>
-        <boxGeometry args={[0.58, 0.03, 0.04]} />
+      <RoundedBox position={[0, 0.24, 0]} args={[0.58, 0.03, 0.04]} radius={0.012} smoothness={3}>
         <meshPhysicalMaterial color="#B0A898" roughness={0.42} metalness={0.62} clearcoat={0.3} clearcoatRoughness={0.1} />
-      </mesh>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[0.62, 0.015, 0.12]} />
+      </RoundedBox>
+      <RoundedBox position={[0, 0, 0]} args={[0.62, 0.015, 0.12]} radius={0.01} smoothness={3}>
         <meshPhysicalMaterial color="#9A9490" roughness={0.52} metalness={0.58} clearcoat={0.2} clearcoatRoughness={0.12} />
-      </mesh>
+      </RoundedBox>
       {[-0.19, 0, 0.19].map((x, i) => (
         <group key={i} position={[x, 0.22, 0.02]}>
           <mesh>
@@ -1386,10 +905,9 @@ function PortafilterRack({ position }: { position: [number, number, number] }) {
 function Knockbox({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
-      <mesh position={[0, 0.076, 0]}>
-        <boxGeometry args={[0.28, 0.15, 0.2]} />
+      <RoundedBox position={[0, 0.076, 0]} args={[0.28, 0.15, 0.2]} radius={0.025} smoothness={4}>
         <meshStandardMaterial color="#1E1E1C" roughness={0.88} metalness={0.1} />
-      </mesh>
+      </RoundedBox>
       <mesh position={[0, 0.14, 0]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.02, 0.02, 0.25, 8]} />
         <meshStandardMaterial color="#484844" roughness={0.8} metalness={0.3} />
@@ -1445,50 +963,6 @@ function CupStack({ position, count = 4 }: { position: [number, number, number];
     </group>
   );
 }
-
-function SmallPlant({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      <mesh position={[0, 0.07, 0]}>
-        <cylinderGeometry args={[0.065, 0.052, 0.14, 12]} />
-        <meshStandardMaterial color="#8B6E50" roughness={0.85} metalness={0.05} />
-      </mesh>
-      <mesh position={[0, 0.142, 0]}>
-        <cylinderGeometry args={[0.062, 0.062, 0.01, 12]} />
-        <meshStandardMaterial color="#3A2A18" roughness={0.95} metalness={0} />
-      </mesh>
-      {[0, 0.7, 1.5, 2.3, 3.1, 3.8].map((rot, i) => (
-        <mesh key={i}
-          position={[Math.sin(rot) * 0.04, 0.24 + i * 0.02, Math.cos(rot) * 0.04]}
-          rotation={[0.2 + i * 0.06, rot, 0.1]}
-        >
-          <planeGeometry args={[0.06 + (i % 3) * 0.02, 0.18 + (i % 2) * 0.04]} />
-          <meshStandardMaterial
-            color={`hsl(${100 + i * 5}, ${38 + i * 3}%, ${28 + i * 2}%)`}
-            roughness={0.85} metalness={0} side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function WaterGlasses({ position }: { position: [number, number, number] }) {
-  return (
-    <group position={position}>
-      {[0, 0.1].map((x, i) => (
-        <mesh key={i} position={[x, 0.09, 0]}>
-          <cylinderGeometry args={[0.028, 0.024, 0.18, 12]} />
-          <meshPhysicalMaterial
-            color="#C8D8E0" roughness={0.04} metalness={0}
-            transmission={0.9} transparent ior={1.52} thickness={0.08}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 // ─── PENDANT LIGHTS ───────────────────────────────────────────────────────────
 const PENDANTS = [
   { x: -3.2, cord: 1.5, r: 0.10, intensity: 3.2 },
@@ -1499,19 +973,12 @@ const PENDANTS = [
 ];
 
 function PendantLights() {
-  const refs = useRef<THREE.Mesh[]>([]);
-  useFrame(() => {
-    refs.current.forEach((m, i) => {
-      if (!m) return;
-      m.rotation.z = Math.sin(Date.now() * 0.0004 + i * 1.2) * 0.012;
-    });
-  });
-
   return (
     <group>
       {PENDANTS.map((p, i) => {
         const ceilY = 4.45;
         const bulbY = ceilY - p.cord - p.r;
+        const shadeY = bulbY + p.r * 0.45;
         return (
           <group key={i} position={[p.x, 0, -1.2]}>
             <mesh position={[0, ceilY - p.cord / 2, 0]}>
@@ -1522,20 +989,39 @@ function PendantLights() {
               <cylinderGeometry args={[0.06, 0.04, 0.05, 10]} />
               <meshStandardMaterial color="#3A2A18" roughness={0.75} metalness={0.2} />
             </mesh>
-            {/* Bulb — high emissive so Bloom picks it up */}
-            <mesh ref={(el) => { if (el) refs.current[i] = el; }} position={[0, bulbY, 0]}>
-              <sphereGeometry args={[p.r, 18, 18]} />
+            <mesh position={[0, shadeY, 0]}>
+              <coneGeometry args={[p.r * 2.25, p.r * 1.35, 28, 1, true]} />
               <meshStandardMaterial
-                color="#FFE8A0"
+                color="#16110D"
+                roughness={0.46}
+                metalness={0.78}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+            {/* Warm bulb inside the shade */}
+            <mesh position={[0, bulbY, 0]}>
+              <sphereGeometry args={[p.r * 0.62, 18, 18]} />
+              <meshStandardMaterial
+                color="#FFD98A"
                 emissive="#FFD060"
-                emissiveIntensity={4.5}
-                roughness={0.05} metalness={0}
+                emissiveIntensity={1.7}
+                roughness={0.2} metalness={0}
+              />
+            </mesh>
+            <mesh position={[0, bulbY + p.r * 0.18, 0]}>
+              <sphereGeometry args={[p.r * 0.66, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+              <meshStandardMaterial
+                color="#FFF0C2"
+                transparent
+                opacity={0.28}
+                roughness={0.08}
+                depthWrite={false}
               />
             </mesh>
             <pointLight
               position={[0, bulbY - 0.1, 0]}
               color="#FFD07A"
-              intensity={p.intensity * 1.8}
+              intensity={p.intensity * 1.15}
               distance={6.0}
               decay={2}
               castShadow={false}
@@ -1547,46 +1033,25 @@ function PendantLights() {
   );
 }
 
-// Floating tooltip that fades/rises on hover
-function Tooltip3D({ visible, text, position }: { visible: boolean; text: string; position: [number, number, number] }) {
-  const ref = useRef<any>(null);
-  useFrame(() => {
-    if (!ref.current) return;
-    const target = visible ? 1 : 0;
-    ref.current.fillOpacity += (target - ref.current.fillOpacity) * 0.12;
-    ref.current.position.y += ((position[1] + (visible ? 0.06 : 0)) - ref.current.position.y) * 0.12;
-  });
-  return (
-    <Text
-      ref={ref}
-      position={position}
-      font="/fonts/OpenSauceSans-Black.ttf"
-      fontSize={0.045}
-      color="#FFFFFF"
-      letterSpacing={0.12}
-      anchorX="center"
-      anchorY="middle"
-      fillOpacity={0}
-      outlineWidth={0.004}
-      outlineColor="#FFFFFF"
-      outlineOpacity={0.6}
-    >
-      {text}
-    </Text>
-  );
-}
-
-function InteractiveItems({ setActivePopup }: { setActivePopup: (p: Popup) => void }) {
-  const [hovered, setHovered] = useState<Popup>(null);
+function InteractiveItems({
+  hovered,
+  setHovered,
+  setActivePopup,
+}: {
+  hovered: HoverTarget;
+  setHovered: (target: HoverTarget) => void;
+  setActivePopup: (p: Popup) => void;
+}) {
   useEffect(() => {
     document.body.style.cursor = hovered ? "pointer" : "auto";
   }, [hovered]);
 
-  const onOver = (e: any, id: Popup) => { e.stopPropagation(); setHovered(id); };
+  const onOver = (e: MeshPointerEvent, id: HoverTarget) => { e.stopPropagation(); setHovered(id); };
   const onOut = () => setHovered(null);
 
   return (
     <group>
+
       {/* MENU - clipboard, placed left of the Order tablet */}
       <group
         position={[1.8, 1.09, 2.0]}
@@ -1595,23 +1060,14 @@ function InteractiveItems({ setActivePopup }: { setActivePopup: (p: Popup) => vo
         onPointerOver={(e) => onOver(e, "menu")}
         onPointerOut={onOut}
       >
-        <mesh position={[0, 0.15, 0]} rotation={[-0.4, 0, 0]}>
-          <boxGeometry args={[0.3, 0.45, 0.02]} />
+        <RoundedBox position={[0, 0.15, 0]} rotation={[-0.4, 0, 0]} args={[0.3, 0.45, 0.02]} radius={0.025} smoothness={4}>
           <meshStandardMaterial color={hovered === "menu" ? "#D4B895" : "#C4A885"} roughness={0.8} />
-        </mesh>
+        </RoundedBox>
         <mesh position={[0, 0.16, 0.012]} rotation={[-0.4, 0, 0]}>
           <planeGeometry args={[0.26, 0.4]} />
           <meshStandardMaterial color="#FDFBF7" roughness={0.9} />
         </mesh>
         <Text position={[0, 0.28, 0.025]} rotation={[-0.4, 0, 0]} font="/fonts/OpenSauceSans-Bold.ttf" fontSize={0.035} color="#333" letterSpacing={0.1}>MENU</Text>
-        <Text position={[0, 0.18, 0.025]} rotation={[-0.4, 0, 0]} font="/fonts/OpenSauceSans-Black.ttf" fontSize={0.018} color="#666" maxWidth={0.2} textAlign="center">
-          Espresso... 3.50{"\n"}Cortado... 4.50{"\n"}Latte... 5.00{"\n"}Pour Over... 6.00
-        </Text>
-        <Tooltip3D
-          visible={hovered === "menu"}
-          text="View Projects"
-          position={[0, 0.62, 0.025]}
-        />
       </group>
 
       {/* ORDER - POS Tablet */}
@@ -1622,39 +1078,41 @@ function InteractiveItems({ setActivePopup }: { setActivePopup: (p: Popup) => vo
         onPointerOver={(e) => onOver(e, "order")}
         onPointerOut={onOut}
       >
-        <mesh position={[0, 0.12, 0]} rotation={[-0.5, 0, 0]}>
-          <boxGeometry args={[0.4, 0.28, 0.02]} />
+        <RoundedBox position={[0, 0.12, 0]} rotation={[-0.5, 0, 0]} args={[0.4, 0.28, 0.02]} radius={0.03} smoothness={5}>
           <meshStandardMaterial color="#111" roughness={0.5} metalness={0.8} />
-        </mesh>
+        </RoundedBox>
         <mesh position={[0, 0.12, 0.011]} rotation={[-0.5, 0, 0]}>
           <planeGeometry args={[0.38, 0.26]} />
           <meshBasicMaterial color={hovered === "order" ? "#3A2A18" : "#1A0F08"} />
         </mesh>
-        <mesh position={[0, 0.02, -0.05]}>
-          <boxGeometry args={[0.15, 0.04, 0.15]} />
+        <RoundedBox position={[0, 0.02, -0.05]} args={[0.15, 0.04, 0.15]} radius={0.015} smoothness={3}>
           <meshStandardMaterial color="#222" roughness={0.8} />
-        </mesh>
+        </RoundedBox>
         <Text position={[0, 0.12, 0.012]} rotation={[-0.5, 0, 0]} font="/fonts/OpenSauceSans-Bold.ttf" fontSize={0.04} color="#FFF" letterSpacing={0.1}>TAP TO ORDER</Text>
-        <Tooltip3D
-          visible={hovered === "order"}
-          text="Start a Conversation"
-          position={[0, 0.35, 0.012]}
-        />
       </group>
     </group>
   );
 }
 
-function CafeEnvironment({ activePopup, setActivePopup }: { activePopup: Popup; setActivePopup: (p: Popup) => void }) {
+function CafeEnvironment({
+  activePopup,
+  hovered,
+  setHovered,
+  setActivePopup,
+}: {
+  activePopup: Popup;
+  hovered: HoverTarget;
+  setHovered: (target: HoverTarget) => void;
+  setActivePopup: (p: Popup) => void;
+}) {
   const tex = useProceduralTextures();
+  const onHover = (e: MeshPointerEvent, target: HoverTarget) => { e.stopPropagation(); setHovered(target); };
+  const onHoverOut = () => setHovered(null);
 
   return (
     <>
       <color attach="background" args={["#1A0F08"]} />
       <fog attach="fog" args={["#221408", 7, 20]} />
-
-      {/* HDRI — warm lobby environment for realistic reflections */}
-      {/* <Environment preset="lobby" background={false} environmentIntensity={0.4} /> */}
 
       {/* Fill lights */}
       <ambientLight color="#FFE8D0" intensity={0.25} />
@@ -1663,7 +1121,7 @@ function CafeEnvironment({ activePopup, setActivePopup }: { activePopup: Popup; 
       <CameraRig activePopup={activePopup} />
 
       <Suspense fallback={null}>
-        <InteractiveItems setActivePopup={setActivePopup} />
+        <InteractiveItems hovered={hovered} setHovered={setHovered} setActivePopup={setActivePopup} />
         <Room tex={tex} />
         <BackBar tex={tex} />
         <Counter tex={tex} />
@@ -1671,92 +1129,146 @@ function CafeEnvironment({ activePopup, setActivePopup }: { activePopup: Popup; 
 
         {/* ── BAR COUNTER — evenly spaced left → right ──────────────────────── */}
 
-        {/* Far-left: Cups and Canisters */}
-        <CupStack position={[-5.2, 1.09, 1.35]} count={4} />
-        <CupStack position={[-4.9, 1.09, 1.35]} count={5} />
-        <CoffeeCanisters position={[-4.3, 1.09, 1.18]} />
+        {/* Far-left: record player, cups, and canisters */}
+        <group
+          onPointerOver={(e) => onHover(e, "vinyl")}
+          onPointerOut={onHoverOut}
+        >
+          <VinylRecordPlayerModel position={[4, 1.09, 1.7]} rotation={[0, 1, 0]} />
+          <mesh position={[4, 1.29, 1.7]}>
+            <boxGeometry args={[0.66, 0.34, 0.5]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+        </group>
+        <CoffeeCanisters position={[1, 1.09, 1.6]} />
 
         {/* Grinding Station */}
-        <EK43 position={[-3.4, 1.09, 1.05]} />
-        <NicheZero position={[-2.7, 1.09, 1.08]} />
-        <NicheZero position={[-2.1, 1.09, 1.08]} />
-        <NicheZero position={[-1.5, 1.09, 1.08]} />
-
-        {/* Prep Station */}
-        <PortafilterRack position={[-0.9, 1.09, 1.05]} />
-        <Knockbox position={[-0.5, 1.09, 1.38]} />
-        <Scale position={[-0.25, 1.104, 1.38]} />
-        <TampingStation position={[-0.1, 1.09, 1.15]} />
+        <ChemexModel position={[-3.42, 1.09, 1.18]} rotation={[0, -0.12, 0]} />
+        <ChemexModel position={[-3.08, 1.09, 1.43]} rotation={[0, 0.16, 0]} />
+        <KettleScaleModel position={[-2.48, 1.09, 1.2]} rotation={[0, 3, 0]} />
+        <CoffeeGrinderModel position={[-1.55, 1.09, 1.2]} rotation={[0, 0.08, 0]} />
+        <CoffeeGrinderModel position={[-1, 1.09, 1.2]} rotation={[0, -0.08, 0]} />
 
         {/* ── ESPRESSO MACHINE — middle ── */}
-        <LaMarzocco position={[0.4, 1.09, 1.05]} />
+        <LaMarzocco position={[-0.1, 1.09, 1.55]} />
         <SteamSystem position={[-0.28, 1.28, 1.22]} />
 
-        {/* Milk & Towels */}
-        <BarTowelRoll position={[1.1, 1.09, 1.40]} />
-        <BarTowelRoll position={[1.25, 1.09, 1.40]} />
-        <MilkPitchers position={[1.4, 1.09, 1.15]} />
-        <BarTowelRoll position={[1.6, 1.09, 1.40]} />
+        {/* Milk, cups, and serviceware */}
+        <group
+          onPointerOver={(e) => onHover(e, "cups")}
+          onPointerOut={onHoverOut}
+        >
+          <MilkPitchers position={[-4.7, 1.09, 1.2]} />
+          <CupStack position={[-4.05, 1.09, 1.55]} count={4} />
+          <CupStack position={[-3.65, 1.09, 1.55]} count={5} />
+          <CupStack position={[-4, 1.09, 1.12]} count={6} />
+          <CupStack position={[-4.05, 1.09, 1.2]} count={4} />
+          <CupStack position={[-3.9, 1.09, 1.5]} count={3} />
+          <CupStack position={[-4, 1.09, 1.45]} count={5} />
+          <mesh position={[-4.18, 1.36, 1.36]}>
+            <boxGeometry args={[1.06, 0.56, 0.58]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+        </group>
 
-        {/* Pour Over Station */}
-        <GooseneckKettle position={[2.1, 1.09, 1.20]} />
-        <V60Stand position={[2.6, 1.09, 1.20]} />
-        <Chemex position={[3.1, 1.09, 1.18]} />
-
-        {/* Far-right: Syrups, Water, and Cups */}
-        <SyrupRack position={[3.8, 1.09, 1.20]} />
-        <SmallPlant position={[4.2, 1.09, 1.18]} />
-        <WaterGlasses position={[4.5, 1.09, 1.38]} />
-        <CupStack position={[4.8, 1.09, 1.12]} count={6} />
-        <CupStack position={[5.05, 1.09, 1.12]} count={4} />
-        <CupStack position={[5.3, 1.09, 1.15]} count={3} />
-        <CupStack position={[5.55, 1.09, 1.15]} count={5} />
-
-        <ContactShadows
-          position={[0, 1.096, 1.7]}
-          rotation={[Math.PI / 2, 0, 0]}
-          opacity={0.5}
-          scale={[12, 1.4]}
-          blur={1.8}
-          far={0.5}
-          color="#1A0F08"
-        />
-
-        {/* ── POST-PROCESSING ── */}
-        <EffectComposer>
-          {/* Bloom — makes pendant bulbs genuinely glow */}
-          <Bloom
-            mipmapBlur
-            luminanceThreshold={0.62}
-            luminanceSmoothing={0.35}
-            intensity={1.4}
-          />
-          {/* Depth of Field — focus on machine, blur near edge + far wall */}
-          {/* <DepthOfField
-            focusDistance={0.078}
-            focalLength={0.028}
-            bokehScale={2.8}
-          /> */}
-          {/* Film grain — breaks the mathematical perfection */}
-          <Noise
-            opacity={0.032}
-            blendFunction={BlendFunction.SOFT_LIGHT}
-          />
-          {/* Vignette — frames the scene */}
-          <Vignette
-            darkness={0.52}
-            offset={0.38}
-            blendFunction={BlendFunction.NORMAL}
-          />
-        </EffectComposer>
       </Suspense>
     </>
   );
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
+const HOVER_OVERLAYS: Record<NonNullable<HoverTarget>, {
+  label: string;
+  left: string;
+  top: string;
+  width: number;
+  height: number;
+}> = {
+  menu: { label: "[View Projects]", left: "59%", top: "54%", width: 132, height: 172 },
+  order: { label: "[Connect]", left: "67%", top: "55%", width: 150, height: 112 },
+  vinyl: { label: "[Now Playing]", left: "78%", top: "52%", width: 168, height: 116 },
+  cups: { label: "[Cafe Tools]", left: "11%", top: "53%", width: 188, height: 122 },
+};
+
+function HoverOverlay({ target }: { target: HoverTarget }) {
+  const [lastTarget, setLastTarget] = useState<NonNullable<HoverTarget>>("menu");
+
+  useEffect(() => {
+    if (target) setLastTarget(target);
+  }, [target]);
+
+  const cfg = HOVER_OVERLAYS[target ?? lastTarget];
+  const active = Boolean(target);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: cfg.left,
+        top: cfg.top,
+        width: cfg.width,
+        height: cfg.height,
+        transform: `translate(-50%, -50%) scale(${active ? 1 : 0.94})`,
+        opacity: active ? 1 : 0,
+        transition: active
+          ? "opacity 180ms ease-out, transform 260ms cubic-bezier(0.16, 1, 0.3, 1)"
+          : "opacity 180ms ease-out, transform 180ms ease-out",
+        pointerEvents: "none",
+        zIndex: 70,
+      }}
+    >
+      {(["tl", "tr", "bl", "br"] as const).map((corner) => {
+        const vertical = corner.includes("t") ? { top: 0 } : { bottom: 0 };
+        const horizontal = corner.includes("l") ? { left: 0 } : { right: 0 };
+        const xOffset = corner.includes("l") ? 0 : -34;
+        const yOffset = corner.includes("t") ? 0 : -34;
+
+        return (
+          <div key={corner} style={{ position: "absolute", ...vertical, ...horizontal }}>
+            <span
+              style={{
+                position: "absolute",
+                width: 34,
+                height: 1,
+                background: "#E8E1D6",
+                transform: `translateX(${xOffset}px)`,
+              }}
+            />
+            <span
+              style={{
+                position: "absolute",
+                width: 1,
+                height: 34,
+                background: "#E8E1D6",
+                transform: `translateY(${yOffset}px)`,
+              }}
+            />
+          </div>
+        );
+      })}
+      <div
+        style={{
+          position: "absolute",
+          right: -8,
+          bottom: -26,
+          color: "#FFFFFF",
+          fontFamily: "'OpenSauceSans', sans-serif",
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.02em",
+          textShadow: "0 1px 6px rgba(0,0,0,0.85)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {cfg.label}
+      </div>
+    </div>
+  );
+}
+
 export default function Scene3D() {
   const [activePopup, setActivePopup] = useState<Popup>(null);
+  const [hoveredTarget, setHoveredTarget] = useState<HoverTarget>(null);
   const [caseStudySlug, setCaseStudySlug] = useState<string | null>(null);
 
   const openPopup = useCallback((p: Popup) => setActivePopup(p), []);
@@ -1772,20 +1284,20 @@ export default function Scene3D() {
         top: 0,
         left: 0,
         right: 0,
-        padding: '36px 48px',
+        padding: '12px 24px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         zIndex: 50,
-        background: 'transparent',
+        background: '#000000',
         fontFamily: "'OpenSauceSans', sans-serif",
         fontWeight: 700,
         textTransform: 'uppercase',
         letterSpacing: '0.15em',
         fontSize: '0.65rem'
       }}>
-        <div style={{ color: '#F2EDE6', fontSize: '1.4rem', fontFamily: "'Nirakolu', serif", textTransform: 'none', letterSpacing: '3px' }}>
-          Pacey Diep
+        <div style={{ color: '#F2EDE6', fontSize: '1.4rem', fontFamily: "'Nirakolu', serif", textTransform: 'none', letterSpacing: '2px' }}>
+          pacey diep
         </div>
         <div style={{ display: 'flex', gap: '40px' }}>
           <button
@@ -1817,13 +1329,19 @@ export default function Scene3D() {
 
       <Canvas
         gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
-        dpr={[1, 2]}
-        camera={{ position: [0, 1.62, 8.5], fov: 56, near: 0.1, far: 50 }}
-        shadows
+        dpr={[1, 1.5]}
+        camera={{ position: [0, 1.62, 8.5], fov: 66, near: 0.1, far: 50 }}
         style={{ position: "absolute", inset: 0 }}
       >
-        <CafeEnvironment activePopup={activePopup} setActivePopup={setActivePopup} />
+        <CafeEnvironment
+          activePopup={activePopup}
+          hovered={hoveredTarget}
+          setHovered={setHoveredTarget}
+          setActivePopup={setActivePopup}
+        />
       </Canvas>
+
+      <HoverOverlay target={hoveredTarget} />
 
       <MenuPopup isOpen={activePopup === "menu"} onClose={closePopup} onProjectClick={openCaseStudy} />
       <AboutPopup isOpen={activePopup === "about"} onClose={closePopup} />
